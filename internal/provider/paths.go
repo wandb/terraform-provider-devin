@@ -179,3 +179,11 @@ func blueprintFilesPath(orgID, blueprintID string) string {
 	}
 	return orgBlueprintPath(orgID, blueprintID) + "/files"
 }
+
+func enterpriseServiceUserAPIKeysPath(serviceUserID string) string {
+	return "/v3beta1/enterprise/service-users/" + url.PathEscape(serviceUserID) + "/api-keys"
+}
+
+func enterpriseServiceUserAPIKeyPath(serviceUserID, apiKeyID string) string {
+	return enterpriseServiceUserAPIKeysPath(serviceUserID) + "/" + url.PathEscape(apiKeyID)
+}

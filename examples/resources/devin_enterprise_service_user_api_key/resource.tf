@@ -1,0 +1,30 @@
+data "devin_service_users" "all" {}
+
+locals {
+  metrics_service_user_id = one([
+    for su in data.devin_service_users.all.service_users : su.service_user_id
+    if su.name == "Metrics Exporter"
+  ])
+}
+
+# Replace the key every 30 days. Each key expires after 60 days, so a missed
+# apply leaves the current key working.
+resource "time_rotating" "metrics_key" {
+  rotation_days = 30
+}
+
+resource "devin_enterprise_service_user_api_key" "metrics" {
+  service_user_id = local.metrics_service_user_id
+  name            = "metrics-exporter-${formatdate("YYYY-MM-DD", time_rotating.metrics_key.id)}"
+  expires_at      = time_rotating.metrics_key.unix + 60 * 24 * 60 * 60
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Pass the token to the consumer, e.g. a secret manager version.
+output "metrics_token" {
+  value     = devin_enterprise_service_user_api_key.metrics.token
+  sensitive = true
+}

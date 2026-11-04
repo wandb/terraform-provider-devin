@@ -121,6 +121,7 @@ func (p *DevinProvider) Resources(_ context.Context) []func() resource.Resource 
 		NewOrgTagsResource,
 		NewEnterpriseServiceUserRoleResource,
 		NewOrgServiceUserRoleResource,
+		NewEnterpriseServiceUserAPIKeyResource,
 		NewOrgUserRoleResource,
 		NewRepositoryIndexingResource,
 		NewBlueprintResource,
