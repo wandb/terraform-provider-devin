@@ -203,11 +203,16 @@ func (r *enterpriseServiceUserAPIKeyResource) Delete(ctx context.Context, req re
 	}
 
 	err := r.client.Delete(ctx, enterpriseServiceUserAPIKeyPath(state.ServiceUserID.ValueString(), state.APIKeyID.ValueString()), nil)
-	// 404: already gone; 409: already revoked.
-	var apiErr *APIError
-	if err != nil && !(errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusNotFound || apiErr.StatusCode == http.StatusConflict)) {
+	if err != nil && !apiKeyAlreadyRevoked(err) {
 		resp.Diagnostics.AddError("Failed to revoke service user API key", err.Error())
 	}
+}
+
+// apiKeyAlreadyRevoked reports a delete of a key that is already gone (404)
+// or already revoked (409).
+func apiKeyAlreadyRevoked(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusNotFound || apiErr.StatusCode == http.StatusConflict)
 }
 
 // findServiceUserAPIKey returns the key if it is still active, or nil if it
