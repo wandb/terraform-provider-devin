@@ -304,6 +304,7 @@ func (r *automationResource) Create(ctx context.Context, req resource.CreateRequ
 
 	plan.AutomationID = types.StringValue(result.AutomationID)
 	plan.WebhookURL, plan.WebhookSecret = automationWebhook(&result, types.StringNull())
+	resp.Diagnostics.Append(recordOrgDefaultServiceUser(ctx, resp.Private, plan.RunAs, result.RunAs)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	setIdentity(ctx, resp.Identity, automationIdentityModel{OrgID: plan.OrgID, AutomationID: plan.AutomationID}, &resp.Diagnostics)
 }
@@ -336,7 +337,9 @@ func (r *automationResource) Read(ctx context.Context, req resource.ReadRequest,
 	if result.Metadata != nil && len(*result.Metadata) == 0 && priorMetadata.IsNull() {
 		state.Metadata = types.MapNull(types.StringType)
 	}
-	state.RunAs, state.RunAsServiceUser = runAsFromResponse(result.RunAs, state.RunAs)
+	orgDefault, diags := orgDefaultServiceUser(ctx, req.Private)
+	resp.Diagnostics.Append(diags...)
+	state.RunAs, state.RunAsServiceUser = runAsFromResponse(result.RunAs, state.RunAs, orgDefault)
 	state.SlackReplyAccess = automationSlackReplyAccessFromResponse(&result)
 	state.TeamsReplyAccess = automationTeamsReplyAccessFromResponse(&result)
 	state.WebhookURL, state.WebhookSecret = automationWebhook(&result, state.WebhookSecret)
@@ -431,6 +434,7 @@ func (r *automationResource) Update(ctx context.Context, req resource.UpdateRequ
 		priorSecret = state.WebhookSecret
 	}
 	plan.WebhookURL, plan.WebhookSecret = automationWebhook(&result, priorSecret)
+	resp.Diagnostics.Append(recordOrgDefaultServiceUser(ctx, resp.Private, plan.RunAs, result.RunAs)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	setIdentity(ctx, resp.Identity, automationIdentityModel{OrgID: plan.OrgID, AutomationID: plan.AutomationID}, &resp.Diagnostics)
 }
@@ -989,9 +993,12 @@ func (webhookRecomputeModifier) PlanModifyString(ctx context.Context, req planmo
 
 // runAsFromResponse extracts the run-as identity and, for 'service_user',
 // the service user id from a response's run_as union; a missing or
-// unrecognized value means the organization default. The type is passed
-// through normalizeRunAsState against the prior run_as state.
-func runAsFromResponse(union any, prior types.String) (types.String, types.String) {
+// unrecognized value means the organization default. The API reports
+// 'organization' as 'service_user' with the organization's default service
+// user, so a service user matching orgDefault (recorded by
+// recordOrgDefaultServiceUser) reads back as 'organization'. The type is
+// passed through normalizeRunAsState against the prior run_as state.
+func runAsFromResponse(union any, prior types.String, orgDefault string) (types.String, types.String) {
 	var runAs struct {
 		Type          string `json:"type"`
 		ServiceUserID string `json:"service_user_id"`
@@ -1001,7 +1008,7 @@ func runAsFromResponse(union any, prior types.String) (types.String, types.Strin
 			_ = json.Unmarshal(raw, &runAs)
 		}
 	}
-	if runAs.Type == "" {
+	if runAs.Type == "" || (runAs.Type == "service_user" && orgDefault != "" && runAs.ServiceUserID == orgDefault) {
 		runAs.Type = "organization"
 	}
 	serviceUser := types.StringNull()
@@ -1009,6 +1016,38 @@ func runAsFromResponse(union any, prior types.String) (types.String, types.Strin
 		serviceUser = types.StringValue(runAs.ServiceUserID)
 	}
 	return normalizeRunAsState(runAs.Type, prior), serviceUser
+}
+
+// orgDefaultServiceUserKey is the private-state key holding the service user
+// the API resolved run_as 'organization' to on the last create or update.
+const orgDefaultServiceUserKey = "org_default_service_user_id"
+
+type privateState interface {
+	GetKey(ctx context.Context, key string) ([]byte, diag.Diagnostics)
+	SetKey(ctx context.Context, key string, value []byte) diag.Diagnostics
+}
+
+// recordOrgDefaultServiceUser stores the service user a create or update
+// response reports for a planned 'organization' run_as, and clears it for any
+// other identity.
+func recordOrgDefaultServiceUser(ctx context.Context, private privateState, planned types.String, union any) diag.Diagnostics {
+	var value []byte
+	if planned.IsNull() || planned.ValueString() == "organization" {
+		runAs, serviceUser := runAsFromResponse(union, planned, "")
+		if runAs.ValueString() == "service_user" {
+			value, _ = json.Marshal(serviceUser.ValueString())
+		}
+	}
+	return private.SetKey(ctx, orgDefaultServiceUserKey, value)
+}
+
+func orgDefaultServiceUser(ctx context.Context, private privateState) (string, diag.Diagnostics) {
+	raw, diags := private.GetKey(ctx, orgDefaultServiceUserKey)
+	var serviceUser string
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &serviceUser)
+	}
+	return serviceUser, diags
 }
 
 // automationSlackReplyAccessFromResponse maps an omitted policy to the API

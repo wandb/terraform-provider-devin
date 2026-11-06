@@ -289,6 +289,7 @@ func (r *oncallResponderResource) Create(ctx context.Context, req resource.Creat
 
 	plan.ResponderID = types.StringValue(result.ID)
 	plan.applyComputed(&result, types.StringNull())
+	resp.Diagnostics.Append(recordOrgDefaultServiceUser(ctx, resp.Private, plan.RunAs, result.RunAs)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	setIdentity(ctx, resp.Identity, oncallResponderIdentityModel{OrgID: plan.OrgID, ResponderID: plan.ResponderID}, &resp.Diagnostics)
 }
@@ -320,7 +321,9 @@ func (r *oncallResponderResource) Read(ctx context.Context, req resource.ReadReq
 		state.Metadata = types.MapNull(types.StringType)
 	}
 	state.PagerdutyConnectionID = stringFromNullable(result.PagerdutyConnectionID)
-	state.RunAs, state.RunAsServiceUser = runAsFromResponse(result.RunAs, state.RunAs)
+	orgDefault, diags := orgDefaultServiceUser(ctx, req.Private)
+	resp.Diagnostics.Append(diags...)
+	state.RunAs, state.RunAsServiceUser = runAsFromResponse(result.RunAs, state.RunAs, orgDefault)
 	state.applyComputed(&result, state.WebhookSecret)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 	setIdentity(ctx, resp.Identity, oncallResponderIdentityModel{OrgID: state.OrgID, ResponderID: state.ResponderID}, &resp.Diagnostics)
@@ -397,6 +400,7 @@ func (r *oncallResponderResource) Update(ctx context.Context, req resource.Updat
 		priorSecret = state.WebhookSecret
 	}
 	plan.applyComputed(&result, priorSecret)
+	resp.Diagnostics.Append(recordOrgDefaultServiceUser(ctx, resp.Private, plan.RunAs, result.RunAs)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	setIdentity(ctx, resp.Identity, oncallResponderIdentityModel{OrgID: plan.OrgID, ResponderID: plan.ResponderID}, &resp.Diagnostics)
 }

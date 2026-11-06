@@ -411,7 +411,7 @@ func TestAutomationRunAsFromResponse(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, gotServiceUser := runAsFromResponse(runAsResponse(t, tc.raw).RunAs, types.StringValue(tc.want))
+			got, gotServiceUser := runAsFromResponse(runAsResponse(t, tc.raw).RunAs, types.StringValue(tc.want), "")
 			if got.ValueString() != tc.want || !gotServiceUser.Equal(tc.wantServiceUser) {
 				t.Errorf("got (%v, %v), want (%q, %v)", got, gotServiceUser, tc.want, tc.wantServiceUser)
 			}
@@ -440,6 +440,30 @@ func TestNormalizeRunAsState(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := normalizeRunAsState(tc.server, tc.prior); !got.Equal(tc.want) {
 				t.Errorf("normalizeRunAsState(%q, %v) = %v, want %v", tc.server, tc.prior, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunAsFromResponseWithOrgDefault(t *testing.T) {
+	const raw = `{"type": "service_user", "service_user_id": "service-user-default"}`
+	cases := []struct {
+		name            string
+		prior           types.String
+		orgDefault      string
+		want            types.String
+		wantServiceUser types.String
+	}{
+		{"recorded default reads as organization", types.StringValue("organization"), "service-user-default", types.StringValue("organization"), types.StringNull()},
+		{"recorded default keeps omitted run_as null", types.StringNull(), "service-user-default", types.StringNull(), types.StringNull()},
+		{"other service user drifts", types.StringValue("organization"), "service-user-other", types.StringValue("service_user"), types.StringValue("service-user-default")},
+		{"nothing recorded drifts", types.StringValue("organization"), "", types.StringValue("service_user"), types.StringValue("service-user-default")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, gotServiceUser := runAsFromResponse(runAsResponse(t, raw).RunAs, tc.prior, tc.orgDefault)
+			if !got.Equal(tc.want) || !gotServiceUser.Equal(tc.wantServiceUser) {
+				t.Errorf("got (%v, %v), want (%v, %v)", got, gotServiceUser, tc.want, tc.wantServiceUser)
 			}
 		})
 	}
